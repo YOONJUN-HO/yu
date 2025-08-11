@@ -20,9 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-      - run: npm ci
+          node-version: '20'   # cache 옵션 제거
+      - run: npm install       # ← 여기!
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
