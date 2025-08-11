@@ -17,7 +17,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
  */
 
 // 1) 여기에 본인 값 입력
-const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com"; // e.g. 1234567890-abc123.apps.googleusercontent.com
+const GOOGLE_CLIENT_ID = "799750041217-b33n0j95oc9lap4es9sruc0amr8lfurc.apps.googleusercontent.com"; // e.g. 1234567890-abc123.apps.googleusercontent.com
 const YT_API_KEY = "YOUR_YOUTUBE_DATA_API_KEY";
 
 // 2) 권한 범위(읽기 전용)
