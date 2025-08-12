@@ -41,14 +41,17 @@ function isShorts({ title, durationISO }) {
 }
 
 export default function App() {
+  // gapi(client 전용) + GIS(토큰) 로드
   const gapiReady = useScript('https://apis.google.com/js/api.js')
+  const gisReady  = useScript('https://accounts.google.com/gsi/client')
 
+  const [tokenClient, setTokenClient] = useState(null)
   const [authReady, setAuthReady] = useState(false)
   const [signedIn, setSignedIn] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const [feed, setFeed] = useState([])
+  const [feed, setFeed] = useState([]) // {id,title,channelTitle,publishedAt,thumb,duration}
   const [query, setQuery] = useState('')
   const [results, setResults] = useState([])
   const [activeVideoId, setActiveVideoId] = useState('')
@@ -57,26 +60,34 @@ export default function App() {
     GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'temp' &&
     YT_API_KEY && YT_API_KEY !== 'temp'
 
-  // gapi 초기화
+  // gapi(client) 초기화 + GIS 토큰 클라이언트 준비
   useEffect(() => {
-    if (!gapiReady) return
-    if (!hasRealKeys) return
+    if (!gapiReady || !hasRealKeys) return
     const g = window.gapi
-    if (!g) return
-    g.load('client:auth2', async () => {
+    g.load('client', async () => {
       try {
         await g.client.init({
           apiKey: YT_API_KEY,
-          clientId: GOOGLE_CLIENT_ID,
-          discoveryDocs: [
-            'https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest',
-          ],
-          scope: SCOPES,
+          discoveryDocs: ['https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest'],
         })
-        const auth = g.auth2.getAuthInstance()
         setAuthReady(true)
-        setSignedIn(auth.isSignedIn.get())
-        auth.isSignedIn.listen((val) => setSignedIn(val))
+
+        // GIS 준비되면 토큰 클라이언트 생성
+        if (gisReady && window.google?.accounts?.oauth2) {
+          const tc = window.google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: SCOPES,
+            callback: (resp) => {
+              if (resp?.access_token) {
+                window.gapi.client.setToken({ access_token: resp.access_token })
+                setSignedIn(true)
+              } else {
+                setError('토큰 발급 실패')
+              }
+            },
+          })
+          setTokenClient(tc)
+        }
       } catch (e) {
         console.error('gapi init error:', e)
         const msg =
@@ -86,31 +97,26 @@ export default function App() {
         setError('Google API 초기화 실패: ' + msg)
       }
     })
-  }, [gapiReady, hasRealKeys])
+  }, [gapiReady, gisReady, hasRealKeys])
 
-  // 로그인/로그아웃
-  const handleSignIn = async () => {
-    const g = window.gapi
-    if (!g || !authReady) return
-    try {
-      await g.auth2.getAuthInstance().signIn()
-    } catch (e) {
-      console.error('signin error:', e)
-      setError('로그인 실패: ' + (e?.error || e?.message || '알 수 없는 오류'))
-    }
+  // 로그인/로그아웃 (GIS)
+  const handleSignIn = () => {
+    if (!tokenClient) return
+    tokenClient.requestAccessToken({ prompt: 'consent' }) // 최초 동의
   }
 
-  const handleSignOut = async () => {
-    const g = window.gapi
-    if (!g || !authReady) return
+  const handleSignOut = () => {
     try {
-      await g.auth2.getAuthInstance().signOut()
-      setFeed([])
-      setResults([])
-      setActiveVideoId('')
-    } catch (e) {
-      console.error('signout error:', e)
-    }
+      const tok = window.gapi?.client?.getToken()
+      if (tok?.access_token && window.google?.accounts?.oauth2?.revoke) {
+        window.google.accounts.oauth2.revoke(tok.access_token, () => {})
+      }
+    } catch {}
+    window.gapi?.client?.setToken(null)
+    setSignedIn(false)
+    setFeed([])
+    setResults([])
+    setActiveVideoId('')
   }
 
   // 로그인 시 구독 채널 기반 피드 생성
@@ -121,6 +127,7 @@ export default function App() {
       setError('')
       try {
         const g = window.gapi
+        // 1) 구독 채널 목록
         const subsRes = await g.client.youtube.subscriptions.list({
           mine: true,
           part: 'snippet,contentDetails',
@@ -135,6 +142,7 @@ export default function App() {
           setLoading(false)
           return
         }
+        // 2) 각 채널 최신 업로드 수집
         const videoIds = new Set()
         for (const ch of channels) {
           const searchRes = await g.client.youtube.search.list({
@@ -151,6 +159,8 @@ export default function App() {
           })
         }
         const ids = Array.from(videoIds)
+
+        // 3) 상세정보로 duration 받아 쇼츠 제거
         const chunks = []
         for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50))
         const collected = []
@@ -259,11 +269,18 @@ export default function App() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">나만의 YouTube 피드 (쇼츠/조회수/댓글 숨김)</h1>
           <div className="flex items-center gap-2">
             {!signedIn ? (
-              <button onClick={handleSignIn} disabled={!authReady || !hasRealKeys} className="rounded-xl px-4 py-2 shadow border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">
+              <button
+                onClick={handleSignIn}
+                disabled={!tokenClient || !hasRealKeys}
+                className="rounded-xl px-4 py-2 shadow border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+              >
                 Google 계정으로 로그인
               </button>
             ) : (
-              <button onClick={handleSignOut} className="rounded-xl px-4 py-2 shadow border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+              <button
+                onClick={handleSignOut}
+                className="rounded-xl px-4 py-2 shadow border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
                 로그아웃
               </button>
             )}
